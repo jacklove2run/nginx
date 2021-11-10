@@ -443,7 +443,7 @@ ngx_http_ssl_alpn_select(ngx_ssl_conn_t *ssl_conn, const unsigned char **out,
 #if (NGX_HTTP_V2)
     hc = c->data;
 
-    if (hc->addr_conf->http2) {
+    if (hc->addr_conf->http2 || hc->http2) {
         srv =
            (unsigned char *) NGX_HTTP_V2_ALPN_ADVERTISE NGX_HTTP_NPN_ADVERTISE;
         srvlen = sizeof(NGX_HTTP_V2_ALPN_ADVERTISE NGX_HTTP_NPN_ADVERTISE) - 1;
@@ -490,7 +490,7 @@ ngx_http_ssl_npn_advertised(ngx_ssl_conn_t *ssl_conn,
 
     hc = c->data;
 
-    if (hc->addr_conf->http2) {
+    if (hc->addr_conf->http2 || hc->http2) {
         *out =
             (unsigned char *) NGX_HTTP_V2_NPN_ADVERTISE NGX_HTTP_NPN_ADVERTISE;
         *outlen = sizeof(NGX_HTTP_V2_NPN_ADVERTISE NGX_HTTP_NPN_ADVERTISE) - 1;

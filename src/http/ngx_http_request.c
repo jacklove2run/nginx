@@ -792,7 +792,7 @@ ngx_http_ssl_handshake(ngx_event_t *rev)
 
 static void
 ngx_http_ssl_handshake_handler(ngx_connection_t *c)
-{
+{    
     if (c->ssl->handshaked) {
 
         /*
@@ -814,8 +814,24 @@ ngx_http_ssl_handshake_handler(ngx_connection_t *c)
         ngx_http_connection_t  *hc;
 
         hc = c->data;
+        /*
+        cscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
+                                            ngx_http_core_module);
+        if(cscf == NULL || !cscf->server_names.nelts) {
+            return;
+        }
+        sn = cscf->server_names.elts;
+        for(i = 0; i < cscf->server_names.nelts; i++) {
+            if(sn[i].name.len != hc->http2_servername.len) {
+                continue;
+            }
+            if(ngx_strcmp(sn[i].name.data, hc->http2_servername.data) == 0) {
+                hc->http2 = sn[i].http2;
+                break;
+            }
+        }*/
 
-        if (hc->addr_conf->http2) {
+        if (hc->addr_conf->http2 || hc->http2) {
 
 #ifdef TLSEXT_TYPE_application_layer_protocol_negotiation
             SSL_get0_alpn_selected(c->ssl->connection, &data, &len);
@@ -2287,17 +2303,57 @@ ngx_http_find_virtual_server(ngx_connection_t *c,
     ngx_http_request_t *r, ngx_http_core_srv_conf_t **cscfp)
 {
     ngx_http_core_srv_conf_t  *cscf;
+    ngx_str_t                 ck;
+    unsigned                  wc_matched;      //whether matched by wildcard or not
 
     if (virtual_names == NULL) {
         return NGX_DECLINED;
     }
 
-    cscf = ngx_hash_find_combined(&virtual_names->names,
+    cscf = ngx_hash_find_combined_with_key(&virtual_names->names,
                                   ngx_hash_key(host->data, host->len),
-                                  host->data, host->len);
-
+                                  host->data, host->len, c->pool, &ck, &wc_matched);
+    
     if (cscf) {
         *cscfp = cscf;
+        if (r == NULL) {
+            /* 
+             * head wildcard mattching, if ck.data starting with '.',
+             * means that the matched wildcard is like '*.example.com',
+             * otherwise it's like '.example.com'
+             */
+            if (wc_matched == NGX_HASH_WC_HEAD_MATCHING) {
+                if (ck.data[0] == '.') {
+                    ck.data--;
+                    ck.data[0] = '*';
+                } else {
+                    ck.data--;
+                    ck.data[0] = '.';
+                }
+                ck.len++;
+            } else if (wc_matched == NGX_HASH_WC_TAIL_MATCHING) {
+                ck.data[ck.len] = '*';
+                ck.len++;
+            }
+            ngx_http_connection_t  *hc;
+            ngx_http_server_name_t *sn;
+            unsigned i;
+            hc = c->data;
+            hc->http2_servername.len = ck.len;
+            hc->http2_servername.data = ck.data;
+            sn = cscf->server_names.elts;
+            for(i = 0; i < cscf->server_names.nelts; i++) {
+                if(sn[i].name.len != hc->http2_servername.len) {
+                    continue;
+                }
+                if(ngx_strncmp(sn[i].name.data, hc->http2_servername.data, 
+                    hc->http2_servername.len) == 0) 
+                {
+                    hc->http2 = sn[i].http2;
+                    break;
+                }
+            }
+        }
         return NGX_OK;
     }
 
@@ -2326,7 +2382,8 @@ ngx_http_find_virtual_server(ngx_connection_t *c,
                 if (n >= 0) {
                     hc = c->data;
                     hc->ssl_servername_regex = sn[i].regex;
-
+                    hc->http2_servername = sn[i].regex->name;
+                    hc->http2 = sn[i].http2;
                     *cscfp = sn[i].server;
                     return NGX_OK;
                 }

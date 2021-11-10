@@ -48,7 +48,6 @@ ngx_hash_find(ngx_hash_t *hash, ngx_uint_t key, u_char *name, size_t len)
     return NULL;
 }
 
-
 void *
 ngx_hash_find_wc_head(ngx_hash_wildcard_t *hwc, u_char *name, size_t len)
 {
@@ -144,6 +143,118 @@ ngx_hash_find_wc_head(ngx_hash_wildcard_t *hwc, u_char *name, size_t len)
 
 
 void *
+ngx_hash_find_wc_head_with_key(ngx_hash_wildcard_t *hwc, u_char *name, size_t len, 
+    ngx_str_t *ck, u_char *index)
+{
+    void        *value;
+    ngx_uint_t   i, n, key;
+
+#if 0
+    ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0, "wch:\"%*s\"", len, name);
+#endif
+
+    n = len;
+    
+    while (n) {
+        if (name[n - 1] == '.') {
+            break;
+        }
+
+        n--;
+    }
+
+    key = 0;
+
+    for (i = n; i < len; i++) {
+        key = ngx_hash(key, name[i]);
+    }
+
+#if 0
+    ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0, "key:\"%ui\"", key);
+#endif
+
+    value = ngx_hash_find(&hwc->hash, key, &name[n], len - n);
+
+#if 0
+    ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0, "value:\"%p\"", value);
+#endif
+
+    if (value) {
+        /*
+         * if the value last 2 bits are '00'
+         */
+        if (n > 0 && !((uintptr_t) value & 3)) {
+            ck->data = index + n + 1;
+            ngx_memcpy(ck->data, &name[n], len - n);
+            ck->len = len - n + ck->len;
+        } else if (n > 0) {
+            ck->data = index + n;
+            ngx_memcpy(ck->data, &name[n - 1], len - n + 1);  //add matched key and the dot into ck->data
+            ck->len = len - n + 1 + ck->len;
+        } else if(n == 0) {
+            ck->data = index + 1;
+            ngx_memcpy(ck->data, name, len);
+            ck->len = len + ck->len;
+        }
+        
+        /*
+         * the 2 low bits of value have the special meaning:
+         *     00 - value is data pointer for both "example.com"
+         *          and "*.example.com";
+         *     01 - value is data pointer for "*.example.com" only;
+         *     10 - value is pointer to wildcard hash allowing
+         *          both "example.com" and "*.example.com";
+         *     11 - value is pointer to wildcard hash allowing
+         *          "*.example.com" only.
+         */
+
+        if ((uintptr_t) value & 2) {
+
+            if (n == 0) {
+
+                /* "example.com" */
+
+                if ((uintptr_t) value & 1) {
+                    return NULL;
+                }
+
+                hwc = (ngx_hash_wildcard_t *)
+                                          ((uintptr_t) value & (uintptr_t) ~3);
+                return hwc->value;
+            }
+
+            hwc = (ngx_hash_wildcard_t *) ((uintptr_t) value & (uintptr_t) ~3);
+
+            value = ngx_hash_find_wc_head_with_key(hwc, name, n - 1, ck, index);
+
+            if (value) {
+                return value;
+            }
+
+            return hwc->value;
+        }
+
+        if ((uintptr_t) value & 1) {
+
+            if (n == 0) {
+
+                /* "example.com" */
+
+                return NULL;
+            }
+
+            return (void *) ((uintptr_t) value & (uintptr_t) ~3);
+        }
+
+        return value;
+    }
+
+    return hwc->value;
+}
+
+
+
+void *
 ngx_hash_find_wc_tail(ngx_hash_wildcard_t *hwc, u_char *name, size_t len)
 {
     void        *value;
@@ -206,6 +317,72 @@ ngx_hash_find_wc_tail(ngx_hash_wildcard_t *hwc, u_char *name, size_t len)
     return hwc->value;
 }
 
+void *
+ngx_hash_find_wc_tail_with_key(ngx_hash_wildcard_t *hwc, u_char *name, size_t len, ngx_str_t *ck)
+{
+    void        *value;
+    ngx_uint_t   i, key;
+
+#if 0
+    ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0, "wct:\"%*s\"", len, name);
+#endif
+
+    key = 0;
+
+    for (i = 0; i < len; i++) {
+        if (name[i] == '.') {
+            break;
+        }
+
+        key = ngx_hash(key, name[i]);
+    }
+
+    if (i == len) {
+        return NULL;
+    }
+
+#if 0
+    ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0, "key:\"%ui\"", key);
+#endif
+
+    value = ngx_hash_find(&hwc->hash, key, name, i);
+
+#if 0
+    ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0, "value:\"%p\"", value);
+#endif
+
+    if (value) {
+        ngx_memcpy(ck->data + ck->len, name, i + 1);  //add matched key and the dot into ck->data
+        ck->len = ck->len + i + 1;
+
+        /*
+         * the 2 low bits of value have the special meaning:
+         *     00 - value is data pointer;
+         *     11 - value is pointer to wildcard hash allowing "example.*".
+         */
+
+        if ((uintptr_t) value & 2) {
+
+            i++;
+
+            hwc = (ngx_hash_wildcard_t *) ((uintptr_t) value & (uintptr_t) ~3);
+
+            value = ngx_hash_find_wc_tail_with_key(hwc, &name[i], len - i, ck);
+
+            if (value) {
+                return value;
+            }
+
+            return hwc->value;
+        }
+
+        return value;
+    }
+
+    return hwc->value;
+}
+
+
 
 void *
 ngx_hash_find_combined(ngx_hash_combined_t *hash, ngx_uint_t key, u_char *name,
@@ -237,6 +414,53 @@ ngx_hash_find_combined(ngx_hash_combined_t *hash, ngx_uint_t key, u_char *name,
         value = ngx_hash_find_wc_tail(hash->wc_tail, name, len);
 
         if (value) {
+            return value;
+        }
+    }
+
+    return NULL;
+}
+
+void *
+ngx_hash_find_combined_with_key(ngx_hash_combined_t *hash, ngx_uint_t key, u_char *name,
+    size_t len, ngx_pool_t *pool, ngx_str_t *ck, unsigned *wc_matched)
+{
+    void  *value;
+
+    if (hash->hash.buckets) {
+        value = ngx_hash_find(&hash->hash, key, name, len);
+
+        if (value) {
+            ck->len = len;
+            ck->data = name;
+            return value;
+        }
+    }
+
+    if (len == 0) {
+        return NULL;
+    }
+    ck->data = ngx_palloc(pool, len + 1);
+    ck->len = 0;
+    u_char *index = ck->data;  //to hold the head address of this block
+    
+    if (hash->wc_head && hash->wc_head->hash.buckets) {
+        if(ck->data == NULL) {
+            return NULL; 
+        }
+        value = ngx_hash_find_wc_head_with_key(hash->wc_head, name, len, ck, index);
+
+        if (value) {
+            *wc_matched = NGX_HASH_WC_HEAD_MATCHING;
+            return value;
+        }
+    }
+
+    if (hash->wc_tail && hash->wc_tail->hash.buckets) {
+        value = ngx_hash_find_wc_tail_with_key(hash->wc_tail, name, len, ck);
+
+        if (value) {
+            *wc_matched = NGX_HASH_WC_TAIL_MATCHING;
             return value;
         }
     }

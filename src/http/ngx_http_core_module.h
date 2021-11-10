@@ -218,6 +218,7 @@ typedef struct {
 #endif
     ngx_http_core_srv_conf_t  *server;   /* virtual name server conf */
     ngx_str_t                  name;
+	unsigned                   http2:1;
 } ngx_http_server_name_t;
 
 

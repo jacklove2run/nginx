@@ -315,6 +315,11 @@ typedef struct {
 #if (NGX_PCRE)
     ngx_http_regex_t                 *ssl_servername_regex;
 #endif
+#if	(NGX_HTTP_V2)
+    ngx_str_t	                      http2_servername;
+    unsigned                          http2;
+#endif
+
 #endif
 
     ngx_chain_t                      *busy;

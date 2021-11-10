@@ -4223,6 +4223,7 @@ ngx_http_core_server_name(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_str_t               *value;
     ngx_uint_t               i;
     ngx_http_server_name_t  *sn;
+    ngx_http_server_name_t  *http2sn;
 
     value = cf->args->elts;
 
@@ -4243,7 +4244,16 @@ ngx_http_core_server_name(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                                "server name \"%V\" has suspicious symbols",
                                &value[i]);
         }
-
+    if(ngx_strcasecmp(value[i].data, (u_char *) "http2_on") == 0) {
+        if(i == 1) {
+            continue;
+        }
+        http2sn = cscf->server_names.elts;
+        http2sn[cscf->server_names.nelts-1].http2 = 1;
+        //http2sn = cscf->server_names.elts + (cscf->server_names.nelts-1) * cscf->server_names.size;
+        //http2sn->http2 = 1;
+        continue;
+        }
         sn = ngx_array_push(&cscf->server_names);
         if (sn == NULL) {
             return NGX_CONF_ERROR;
@@ -4253,7 +4263,6 @@ ngx_http_core_server_name(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         sn->regex = NULL;
 #endif
         sn->server = cscf;
-
         if (ngx_strcasecmp(value[i].data, (u_char *) "$hostname") == 0) {
             sn->name = cf->cycle->hostname;
 
